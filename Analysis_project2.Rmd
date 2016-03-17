@@ -1,0 +1,320 @@
+---
+title: "An Analysis on Weather Phenomena and Impacts on Population Health and Economic Consequences"
+author: "Michael McDonnell"
+date: "February 1, 2016"
+output: html_document
+---
+##Synopsis
+We begun with a NOAA dataset, which among other things, recorded the total damage to the human poulation as well as property and crops from various meteorlogical and oceanic phenomena. A handful of features reflecting these interests were subsetted into a new dataframe. The exponent notation system was done away with for a concrete numerical accountability system. The phenomena were documented rather messily and were generalized form roughly 400 types to a handful. There were stark differences among the most destructive phenomena and as such an exploratory visualzation was used to draw conclusions.
+
+##Data Processing
+We begin by reading in the data from the URL which we will make use of in the analysis.
+```{r, echo=TRUE, cache = TRUE, warning = FALSE, message=FALSE}
+temp <- tempfile()
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, destfile = temp)
+dat <- read.csv(temp)
+```
+
+Since we are only concerned with the economic and health impacts from the weather
+events, we can subset the dataframe into one with the features only concerned with
+those aspects. For this, we make use of dplyr's select.
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+library(dplyr)
+dat <- select(dat, EVTYPE, FATALITIES, INJURIES, PROPDMG,
+              PROPDMGEXP, CROPDMG, CROPDMGEXP)
+dat_relevant <- filter(dat, FATALITIES > 0 | INJURIES > 0 | PROPDMG > 0 |
+                               CROPDMG > 0)
+```
+
+The features 'CROPDMGEXP' and 'PROPDMGEXP' are described by the factor levels
+'H','K','M' for hundred, thousand, and millions of dollars in damage. However, the features CROPDMG and PROPDMG are only the numbers for each corresponding order of
+magnitude (H,K, or M).
+
+The first step in using this is to convert the factors to characters.
+```{r, echo = TRUE}
+dat_relevant$PROPDMGEXP <- as.character(dat_relevant$PROPDMGEXP)
+dat_relevant$CROPDMGEXP <- as.character(dat_relevant$CROPDMGEXP)
+```
+
+To handle this, we are going to define a function to replace H,K, and M with 
+their respective integer values: 100, 1000, and 1000000. We can define a function to do this for us. One may note the final inclusive condition is to make all other values 1. This is because some events have indeed caused less than a hundred dollars in damage, and thus need no multiplier for magnitude (or rather a multiplier of 1).
+```{r}
+get_values <- function(character){
+        if(character == ""){
+                character = 0
+        }
+        else if(character == "H"){
+                character = 100
+        }
+        else if(character == "K"){
+                character = 1000
+        }
+        else if(character == "M"){
+                character = 1000000
+        }
+        else
+                character = 1
+}
+```
+
+We will then apply this function on each observation in the features PROPDMGEXP and CROPDMGEXP.
+
+```{r}
+dat_relevant$PROPDMGEXP <- sapply(dat_relevant$PROPDMGEXP, get_values)
+dat_relevant$CROPDMGEXP <- sapply(dat_relevant$CROPDMGEXP, get_values)
+```
+
+Now that we have two numeric columns, we will perform an element-wise mutliplication of the two features concerning the base damage amount and relevant order of magnitude. This is stored in a new varabiles, croptotals and proptotals.
+
+For a simplified 'version control', we will assign these new values to a dataframe called dat_clean.
+```{r}
+dat_relevant <- mutate(dat_relevant, crop_totals = CROPDMG * CROPDMGEXP)
+dat_relevant <- mutate(dat_relevant, prop_totals = PROPDMG * PROPDMGEXP)
+dat_clean <- select(dat_relevant, -c(PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP))
+```
+
+We now have the pleasure to take a peek at what lies in the feature "EVTYPE", which is a factor with its levels being an observation for each type of event. This specific given dataset is especially wonderful because it contains duplications, vagueness, spelling errors, and just about every other type of errata imaginable.
+
+We are going to do our best to consolidate all of these shortcomings. For example, we want to consider how much property damage 'wind' has done. But, there are observations for things such as:
+*wind 10
+*wind 20
+*wind 30
+*high winds
+*heavy wind
+*thunderstorm wind
+*gust winds
+*winds
+*strong wind
+*strong winds
+*wind damage
+*thunderstorm wind G55
+*thunderstorm wind G60
+*thunderstorm wind 63 mph
+*thundeerstorm winds
+*heavy snow and strong winds
+
+Just to name a few.
+
+Thus, we convert the factor levels for event types (EVTYPE) into characters for our data wrangling. We then begin the process of picking out patterns and making use of the grep function for finding like terms. We do this for each major event (lots and lots of consolidating specifics) and create a list of indicies for observations of dat_clean for the broad events.
+
+These categorical organization of observation indicies is stored in the variable (whatever event)Indicies. We then let x be the subset of dat_clean for each event. We then define whatever event, e.g. wind, to be the sum of each of the columns of the subsetted data. This will give us the total fatalities, injuries, croptotals, and proptotals.
+```{r}
+windIndicies <- c(grep('WIND', dat_clean$EVTYPE),
+                  grep("WINDS", dat_clean$EVTYPE))
+x <- dat_clean[windIndicies,]
+wind <- colSums(x[,2:5], na.rm = TRUE)
+
+heatIndicies <- c(grep('HEAT', dat_clean$EVTYPE),
+                  grep("HYPERTHERMIA", dat_clean$EVTYPE))
+x <- dat_clean[heatIndicies, ]
+heat <- colSums(x[,2:5], na.rm = TRUE)
+
+coldIndicies <- c(grep('COLD', dat_clean$EVTYPE),
+                  grep("HYPOTHERMIA", dat_clean$EVTYPE))
+x <- dat_clean[coldIndicies, ]
+cold <- colSums(x[,2:5], na.rm = TRUE)
+
+floodIndicies <- c(grep('FLOOD', dat_clean$EVTYPE), 
+                     grep('FLOODING', dat_clean$EVTYPE),
+                   grep("FLD", dat_clean$EVTYPE),
+                   grep("SURGE", dat_clean$EVTYPE))
+x <- dat_clean[floodIndicies, ]
+flood <- colSums(x[,2:5], na.rm = TRUE)
+
+
+snowIndicies <- c(grep('SNOW', dat_clean$EVTYPE),
+                  grep("WINTER WEATHER", dat_clean$EVTYPE))
+x <- dat_clean[snowIndicies, ]
+snow <- colSums(x[,2:5], na.rm = TRUE)
+
+
+blizzardIndicies <- grep('BLIZZARD', dat_clean$EVTYPE)
+x <- dat_clean[blizzardIndicies, ]
+blizzard <- colSums(x[,2:5], na.rm = TRUE)
+
+
+thunderstormIndicies <- grep('THUNDERSTORM', dat_clean$EVTYPE)
+x <- dat_clean[thunderstormIndicies, ]
+thunderstorm <- colSums(x[,2:5], na.rm = TRUE)
+
+
+iceIndicies <- c(grep('ICE', dat_clean$EVTYPE),
+                 grep("ICY", dat_clean$EVTYPE))
+x <- dat_clean[iceIndicies, ]
+ice <- colSums(x[,2:5], na.rm = TRUE)
+
+
+seaIndicies <- c(grep("\\bSEAS\\b", dat_clean$EVTYPE),
+                    grep('SURF', dat_clean$EVTYPE),
+                 grep("WAVE", dat_clean$EVTYPE),
+                 grep("SEA", dat_clean$EVTYPE))
+x <- dat_clean[seaIndicies, ]
+sea <- colSums(x[,2:5], na.rm = TRUE)
+
+
+hailIndicies <- grep("HAIL", dat_clean$EVTYPE)
+x <- dat_clean[hailIndicies, ]
+hail <- colSums(x[,2:5], na.rm = TRUE)
+
+tropicalStormIndicies <- c(grep("HURRICANE", dat_clean$EVTYPE),
+                           grep("TROPICAL", dat_clean$EVTYPE),
+                           grep("TSUNAMI", dat_clean$EVTYPE))
+x <- dat_clean[tropicalStormIndicies, ]
+tropicalSystems <- colSums(x[,2:5], na.rm = TRUE)
+
+tornadoIndicies <- c(grep("TORNADO", dat_clean$EVTYPE),
+                     grep("TORNDAO", dat_clean$EVTYPE))
+x <- dat_clean[tornadoIndicies, ]
+tornado <- colSums(x[,2:5], na.rm = TRUE)
+
+rainIndicies <- c(grep("RAIN", dat_clean$EVTYPE),
+                  grep("RAINFALL", dat_clean$EVTYPE),
+                  grep("RAIN SHOWER", dat_clean$EVTYPE))
+x <- dat_clean[rainIndicies, ]
+rain <- colSums(x[,2:5], na.rm = TRUE)
+
+spoutIndicies <- c(grep("LANDSPOUT", dat_clean$EVTYPE),
+                   grep("WATERSPOUT", dat_clean$EVTYPE),
+                   grep("SPOUT", dat_clean$EVTYPE))
+x <- dat_clean[spoutIndicies, ]
+spout <- colSums(x[,2:5], na.rm = TRUE)
+```
+
+Thus, we have a tidy representation of each relevant feature for a generalized weather event. For example, the relevant data for spouts:
+
+```{r, echo = FALSE}
+spout
+```
+
+At this point we would like to combine all of the weather events and their relevant sums into a nice compact dataframe.
+
+We then convert it into an actual data frame, dat_final, and give the observations their respective event names.
+```{r}
+dat_list <- rbind(wind, heat , cold, flood, snow, blizzard,
+                   thunderstorm, ice, sea, hail, tropicalSystems,
+                   tornado, rain, spout)
+
+type_names <- c("wind", "heat", "cold", "flood", "snow", "blizzard",
+                "thunderstorm", "ice", "sea", "hail", "tropical Systems",
+                "tornado", "rain", "spout")
+
+dat_final <- as.data.frame(dat_list)
+dat_final$event_type <- type_names
+```
+
+```{r, echo = FALSE}
+dat_final
+
+```
+
+It'd be a lot nice to have the event type be the first feature. I think it would read a lot nicer.
+
+```{r}
+names(dat_final) <- tolower(names(dat_final))
+dat_final <- dat_final %>% select(event_type, fatalities, injuries,
+                              crop_totals, prop_totals)
+```
+```{r, echo = FALSE}
+dat_final
+```
+
+At this point we have all of the data neatly organized that we need. We are ready for the last few steps of data processing before we get a real look at answering our questions.
+
+Since our first question address which events are the most damaging economically, we will create another dataframe which is only concerned with such.
+
+We will subset dat_final and create a new dataframe called economydamage.
+```{r}
+dat_final <- mutate(dat_final, econ_harm = crop_totals + prop_totals)
+economy_damage <- arrange(dat_final, desc(econ_harm)) %>% 
+        select(event_type, econ_harm, crop_totals, prop_totals)
+```
+```{r, echo = FALSE}
+economy_damage
+```
+
+Our second question is about which events are the most damaging to the population. Our process will be the same except for a dataframe called population_damage.
+
+```{r}
+dat_final <- mutate(dat_final, pop_harm = fatalities + injuries)
+population_damage <- arrange(dat_final, desc(pop_harm)) %>%
+        select(event_type, pop_harm, fatalities, injuries)
+```
+```{r, echo = FALSE}
+population_damage
+```
+
+At this point, I would like to say the totals for population and economy damage have room for intepretation. I think it is much more reasonable to consider the total economy damage as the equally weighted sum of the property and crop damages.
+
+However, the population harm metric, pop_harm, is also the equally weighted sum of fatalities and injuries. I believe that most people might be of the opinion that dying is a more severe outcome than sustaining an injury from a catastrophe. For simplicity and in lieu of later analyses, it is left as this simple summation.
+
+As equally important to note, 'injuries' is not rigorously defined and may range from an abrasian to becoming something as serious quadriplegic. Nevertheless, some exploratory analysis later will examine these catastrophes on an injury vs fatality basis.
+
+One may note that from the previously printed data, the top contributors to population and economic damages are quite distinguished from the others. In this case, some visuals will be greatly helpful.
+
+We will first reshape the dataframes so that it can be more easily interpreted by ggplot for the various factors we are going to plot against.
+
+```{r}
+library(reshape2)
+econ_damage_long <- melt(economy_damage)
+econ_damage_long <- filter(econ_damage_long,variable == "crop_totals" |
+                                   variable == "prop_totals")
+#Removing unused factor levels
+econ_damage_long$variable <- factor(econ_damage_long$variable)
+
+PD_long <- melt(population_damage)
+PD_long <- filter(PD_long, variable == "fatalities" | variable == "injuries")
+#Removing unused factor levels 
+PD_long$variable <- factor(PD_long$variable)
+```
+
+```{r, out.width= '\\maxwidth'}
+library(ggplot2)
+g2 <- ggplot(econ_damage_long, aes(x = factor(event_type), y = value, 
+                                   fill = factor(variable)))
+g2 <- g2 + geom_bar(stat = "identity")
+g2 <- g2 + scale_y_continuous("Total Economic Damage") +
+        scale_x_discrete("Event Type") +
+        scale_fill_discrete("Economic Sector", labels=c("Crops", "Property"))
+g2 <- g2 + theme(text = element_text(size=12),
+                 axis.text.x=element_text(angle=90, vjust=1))
+
+
+g3 <- ggplot(PD_long, aes(x=factor(event_type), y=value, fill=factor(variable)))
+g3 <- g3 + geom_bar(stat="identity", position = position_dodge())
+g3 <- g3 + scale_x_discrete("Event Type") +
+        scale_y_continuous("Total Impacted Persons") +
+        scale_fill_discrete("Outcome Type", labels=c("fatalities", "injuries"))
+g3 <- g3 + theme(text = element_text(size=12),
+                 axis.text.x=element_text(angle=90, vjust=1))
+
+
+g4 <- ggplot(population_damage, aes(x=factor(event_type), y=fatalities,
+                                    fill = log2(injuries)))
+g4 <- g4 + geom_bar(stat="identity")
+g4 <- g4 + scale_x_discrete("Event Type") +
+        scale_fill_continuous("Log_2(Injuries)")
+g4 <- g4 + theme(text = element_text(size=12),
+                 axis.text.x=element_text(angle=90, vjust=1))
+```
+
+
+
+
+#Results
+```{r, echo = FALSE, out.width= '\\maxwidth'}
+g2
+```
+It can be seen from the plot above that tornadoes were the most destructive economically overall. The seond closest contender being floods. After this, there is a significant descrease in desctruction, with wind coming in third with under half the amount of damage that floods caused. It is also worth noting that the majority of the damage done was to property.
+
+```{r,echo = FALSE, out.width= '\\maxwidth'}
+g3
+```
+Tornadoes were by far the greatest cause of harm to the human population by over 600% more than the next highest phenomenon, wind. However, this is with the view that injuries are equally as weighted as fatalities. I am of the opinion this is not true.
+```{r,echo = FALSE, out.width= '\\maxwidth'}
+g4
+```
+This plot again shows harm to the human population. The plot is that of the events agaisnt the fatalities. The bars are shaded as the base 2 log of injuries for that given event with a lighter color suggesting more injuries. Again, tornadoes are still the leading cause. Note that the distribution of fatalities is much closer in scale than of human impacts in its entirety.
+
+Though this gives some thought to the relationship between fatalities and injuries for each weather event, the tornado has still caused more destruction than any other weather phenomena.
+
